@@ -1,0 +1,94 @@
+import tkinter as tk
+from tkinter import messagebox
+import sqlite3
+import csv
+
+# setups up the SQLlite datatbase 
+def setup_database(csv_path, db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            Transaction_ID INTEGER PRIMARY KEY,
+            Amount REAL,
+            Date TEXT
+        )
+    ''')
+# opens the csv file and insert rows into the database
+    with open(csv_path, newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        next(reader)  # Skip header row
+        cursor.executemany('INSERT OR REPLACE INTO transactions (Transaction_ID, Amount, Date) VALUES (?, ?, ?)', reader)
+    conn.commit()
+    conn.close()
+
+# compare transactions n the csv file with those in the database
+def compare_transactions(csv_path, db_path, report_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    total_discrepancy_amount = 0
+
+    # open csv file for reading
+    with open(csv_path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        discrepancies = []# creates empty list to store discrepancies
+
+        for row in reader:
+            cursor.execute('SELECT Amount FROM transactions WHERE Transaction_ID = ?', (row['Transaction_ID'],))
+            db_row = cursor.fetchone()
+            
+            # checks if transcation exsists and compares amounts  
+            if db_row is None:
+                discrepancies.append([row['Transaction_ID'], 'None', row['Amount']])
+                total_discrepancy_amount += float(row['Amount'])
+            elif float(db_row[0]) != float(row['Amount']):
+                discrepancies.append([row['Transaction_ID'], db_row[0], row['Amount']])
+                total_discrepancy_amount += abs(float(db_row[0]) - float(row['Amount']))
+
+    # write discrepancies to new csv file
+    with open(report_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Transaction_ID', 'Expected_Amount', 'Actual_Amount'])
+        writer.writerows(discrepancies)
+
+    conn.close() # coles the connection
+    return total_discrepancy_amount
+
+def main():
+    root = tk.Tk()
+    root.title("Transaction Audit Tool")
+
+    db_path = 'transactions.db'
+    transactions_1_csv_path = 'transactions_1.csv'
+    transactions_2_csv_path = 'transactions_2.csv'
+    discrepancies_report_path = 'discrepancies_report.csv'
+
+    # setsup datatbase
+    setup_database(transactions_1_csv_path, db_path)
+
+    # function to start comparison
+    def start_comparison():
+        total_discrepancy_value = compare_transactions(transactions_2_csv_path, db_path, discrepancies_report_path)
+        messagebox.showinfo("Comparison Complete", f"Total discrepancy amount: ${total_discrepancy_value:.2f}")
+
+    # function to display the discrepancies report
+    def view_report():
+        try:
+            with open(discrepancies_report_path, 'r') as file:
+                messagebox.showinfo("Discrepancies Report", file.read())
+        except FileNotFoundError:
+            messagebox.showerror("Error", "No report found. Please run a comparison first.")
+
+    # unction to exit Gui
+    def exit_app():
+        root.destroy()
+
+    # Gui buttons
+    tk.Button(root, text="Start Comparison", command=start_comparison).pack(pady=10)
+    tk.Button(root, text="View Report", command=view_report).pack(pady=10)
+    tk.Button(root, text="Exit", command=exit_app).pack(pady=10)
+
+    root.mainloop()# start the event loop
+
+if __name__ == "__main__":
+    main()
